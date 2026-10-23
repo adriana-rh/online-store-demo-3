@@ -61,6 +61,17 @@ jobs:
       timeout-minutes: 10
       run: |
         dotnet test src/cartservice/
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: src/paymentservice/package-lock.json
+    - name: Node.js Unit Tests (paymentservice)
+      timeout-minutes: 10
+      working-directory: src/paymentservice
+      run: |
+        npm ci
+        npm run test:coverage
     - name: Save PR Number
       run: |
         mkdir -p .pr

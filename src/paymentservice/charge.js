@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+const grpc = require('@grpc/grpc-js');
 const cardValidator = require('simple-card-validator');
 const { v4: uuidv4 } = require('uuid');
 const pino = require('pino');
@@ -30,13 +31,19 @@ const logger = pino({
 class CreditCardError extends Error {
   constructor (message) {
     super(message);
-    this.code = 400; // Invalid argument error
+    this.code = grpc.status.INVALID_ARGUMENT;
   }
 }
 
 class InvalidCreditCard extends CreditCardError {
   constructor (cardType) {
     super(`Credit card info is invalid`);
+  }
+}
+
+class MissingChargeAmount extends CreditCardError {
+  constructor () {
+    super('Charge amount is missing');
   }
 }
 
@@ -52,6 +59,12 @@ class ExpiredCreditCard extends CreditCardError {
   }
 }
 
+function getCardDetails (cardNumber) {
+  // simple-card-validator throws a bare string for empty or missing numbers.
+  if (typeof cardNumber !== 'string' || cardNumber === '') { throw new InvalidCreditCard(); }
+  return cardValidator(cardNumber).getCardDetails();
+}
+
 /**
  * Verifies the credit card number and (pretend) charges the card.
  *
@@ -60,12 +73,12 @@ class ExpiredCreditCard extends CreditCardError {
  */
 module.exports = function charge (request) {
   const { amount, credit_card: creditCard } = request;
+  if (!creditCard) { throw new InvalidCreditCard(); }
   const cardNumber = creditCard.credit_card_number;
-  const cardInfo = cardValidator(cardNumber);
   const {
     card_type: cardType,
     valid
-  } = cardInfo.getCardDetails();
+  } = getCardDetails(cardNumber);
 
   if (!valid) { throw new InvalidCreditCard(); }
 
@@ -77,7 +90,10 @@ module.exports = function charge (request) {
   const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
   const { credit_card_expiration_year: year, credit_card_expiration_month: month } = creditCard;
+  if (!Number.isInteger(month) || month < 1 || month > 12) { throw new InvalidCreditCard(); }
   if ((currentYear * 12 + currentMonth) > (year * 12 + month)) { throw new ExpiredCreditCard(cardNumber.replace('-', ''), month, year); }
+
+  if (!amount) { throw new MissingChargeAmount(); }
 
   logger.info(`Transaction processed: ${cardType} ending ${cardNumber.substr(-4)} \
     Amount: ${amount.currency_code}${amount.units}.${amount.nanos}`);
